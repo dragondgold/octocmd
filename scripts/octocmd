@@ -13,6 +13,7 @@ import pprint
 
 logger = None
 
+
 def configure_logger(name=None, debug=False):
     global logger
     name = name or __name__
@@ -25,6 +26,7 @@ def configure_logger(name=None, debug=False):
     formatter = logging.Formatter("[%(asctime)s %(name)s] %(message)s",  datefmt=datefmt)
     ch.setFormatter(formatter)
     logger.addHandler(ch)
+
 
 def which(program):
     def is_qualified_exe(fpath):
@@ -44,9 +46,11 @@ def which(program):
             return best_guess
     return None
 
+
 def touch(fname, times=None):
     with open(fname, 'a'):
         os.utime(fname, times)
+
 
 class TransformPipeline(object):
     def __init__(self, processors=None, **kw):
@@ -67,7 +71,7 @@ class TransformPipeline(object):
                     continue
                 processors.append(cls)
         return [proc(**self.init_kw) for proc in processors]
-    
+
     def get_pipeline(self, inputfn, outputfn, level=1):
         inputext = os.path.splitext(inputfn)[-1]
         outputext = os.path.splitext(outputfn)[-1]
@@ -99,6 +103,7 @@ class TransformPipeline(object):
             raise RuntimeError, "Could not transform %s -> %s" % (inputfn, outputfn)
         self.run_pipeline(pipeline, **kw)
 
+
 class PrintProcess(object):
     FunctionTemplate = re.compile("transform_(.+)_to_(.+)")
 
@@ -124,9 +129,10 @@ class PrintProcess(object):
         if self.phony or self.stale(inputfn, outputfn):
             self._transform(inputfn, outputfn, **args)
         return self.stale(inputfn, outputfn)
-    
+
     def _transform(self, inputfn, outputfn, **args):
         touch(outputfn)
+
 
 class PrintCommand(PrintProcess):
     Command = "__command__"
@@ -151,7 +157,8 @@ class PrintCommand(PrintProcess):
         msg = "running: %s" % cmd
         logger.debug(msg)
         os.system(cmd)
-        
+
+
 class Cura_API(PrintCommand):
     Command = "cura"
 
@@ -168,6 +175,7 @@ class Cura_API(PrintCommand):
 
     def transform_stl_to_gcode(self, *args, **kw):
         self.transform(*args, **kw)
+
 
 class OpenSCAD_API(PrintCommand):
     Command = "openscad"
@@ -189,6 +197,7 @@ class OpenSCAD_API(PrintCommand):
 
     def transform_scad_to_stl(self, *args, **kw):
         self.transform(*args, **kw)
+
 
 class OctoPrint_API(PrintProcess):
     def __init__(self, *args, **kw):
@@ -249,7 +258,7 @@ class OctoPrint_API(PrintProcess):
 
     def get_location(self, sdcard=False, **kw):
         return "sdcard" if sdcard else "local"
-    
+
     def stale(self, inputfn, outputfn, sdcard=False, filename=None, **kw):
         stale = True
         filename = filename or os.path.split(inputfn)[-1]
@@ -258,12 +267,12 @@ class OctoPrint_API(PrintProcess):
         if file_info:
             stale = os.path.getmtime(inputfn) > file_info["date"]
         return stale
-    
+
     ## high level
     def has_file(self, filename, **kw):
         info = self.get_file(filename, **kw)
         return bool(info)
-    
+
     def get_file(self, filename, **kw):
         location = self.get_location(**kw)
         url = str.join('/', ("files", location, filename))
@@ -284,7 +293,7 @@ class OctoPrint_API(PrintProcess):
         fh = open("content.txt", 'w')
         fh.write(str(res.content))
         return self.check_response(res, 201, **kw)
-    
+
     def delete_file(self, filename, **kw):
         location = self.get_location(**kw)
         url = "files/%s/%s" % (location, filename)
@@ -294,6 +303,18 @@ class OctoPrint_API(PrintProcess):
     def get_state(self, **kw):
         res = self.get("printer")
         return self.check_response(res, 200, **kw)
+
+    def restart_job(self, **kw):
+        res = self.post("job", {"command": "restart"})
+        return self.check_response(res, 204, **kw)
+
+    def pause_job(self, **kw):
+        res = self.post("job", {"command": "pause"})
+        return self.check_response(res, 204, **kw)
+
+    def cancel_job(self, **kw):
+        res = self.post("job", {"command": "cancel"})
+        return self.check_response(res, 204, **kw)
 
     ## transform API
     def _transform(self, inputfn, outputfn, **kw):
@@ -327,7 +348,8 @@ class OctoPrint_API(PrintProcess):
 
     def transform_gcode_to_select(self, inputfn, outputfn, **kw):
         kw["select"] = "1"
-        self.transform(inputfn, outputfn, **kw) 
+        self.transform(inputfn, outputfn, **kw)
+
 
 def load_config(fn, error=True):
     try:
@@ -339,11 +361,13 @@ def load_config(fn, error=True):
             raise RuntimeError, msg
     return {}
 
+
 def save_config(fn, config):
     msg = "Saving config file to '%s'" % fn
     print msg
     fh = open(fn, 'w')
     fh.write(json.dumps(config, sort_keys=True, indent=4))
+
 
 def get_cli():
     def standard_arg_set(sp):
@@ -366,6 +390,15 @@ def get_cli():
 
     # create the parser for the "status" command
     sp = subparsers.add_parser('status', help='printer status')
+
+    # create the parser for the "restart" command
+    sp = subparsers.add_parser('restart', help='restart current job')
+
+    # create the parser for the "pause" command
+    sp = subparsers.add_parser('pause', help='pause current job')
+
+    # create the parser for the "cancel" command
+    sp = subparsers.add_parser('cancel', help='cancel current job')
 
     # create the parser for the "print" command
     sp = subparsers.add_parser('print', help='print a file')
@@ -395,6 +428,7 @@ def get_cli():
 
     return args
 
+
 def process_status(args):
     op = OctoPrint_API(**args.__dict__)
     res = op.get_state(error=True)
@@ -414,7 +448,7 @@ def process_status(args):
                 rpt += '%s%s: ' % (header(level), key)
                 if "text" in obj[key]:
                     rpt += '%s\n' % obj[key]["text"]
-                elif any([type(i) == dict for i in val.values()]): 
+                elif any([type(i) == dict for i in val.values()]):
                     rpt += '\n'
                 rpt += format_status(val, level + 1)
                 vals = []
@@ -428,6 +462,7 @@ def process_status(args):
         return rpt
 
     print format_status(res)
+
 
 def process_init(args):
     def test_config(config):
@@ -455,6 +490,7 @@ def process_init(args):
         complete = len(answer) and (answer[0].lower() == 'y')
     save_config(args.config, cache)
 
+
 def process_target(args):
     targets = []
     infn = args.input_filename[0]
@@ -468,16 +504,29 @@ def process_target(args):
     for targetfn in targets:
         pipe.transform(infn, targetfn)
 
+
 def process(args):
     if args.mode == "status":
         args.config = load_config(args.config)
         process_status(args)
+    elif args.mode == "restart":
+        args.config = load_config(args.config)
+        op = OctoPrint_API(**args.__dict__)
+        op.restart_job(error=True)
+    elif args.mode == "pause":
+        args.config = load_config(args.config)
+        op = OctoPrint_API(**args.__dict__)
+        op.pause_job(error=True)
+    elif args.mode == "cancel":
+        args.config = load_config(args.config)
+        op = OctoPrint_API(**args.__dict__)
+        op.cancel_job(error=True)
     elif args.mode in ("print", "upload", "select"):
         args.config = load_config(args.config)
         process_target(args)
     elif args.mode in ("init"):
         process_init(args)
-        
+
 if __name__ == "__main__":
     args = get_cli()
     configure_logger("octocmd", debug=args.debug)
